@@ -3,14 +3,17 @@ module github.com/otwocoin/otwo-blockchain
 go 1.18
 
 require (
+	github.com/avvvet/oxygen v0.0.0-20220922210542-3b7f79f4084e
+	github.com/common-nighthawk/go-figure v0.0.0-20210622060536-734e95fb86be
 	github.com/libp2p/go-libp2p v0.22.0
-	github.com/libp2p/go-libp2p-kad-dht v0.18.0
+	github.com/libp2p/go-libp2p-pubsub v0.8.1
 	github.com/multiformats/go-multiaddr v0.7.0
+	github.com/savioxavier/termlink v1.2.1
+	go.uber.org/zap v1.23.0
 )
 
 require (
 	github.com/avvvet/merkletree v0.0.1 // indirect
-	github.com/avvvet/oxygen v0.0.0-20220913185515-e5b08e02f082 // indirect
 	github.com/benbjohnson/clock v1.3.0 // indirect
 	github.com/beorn7/perks v1.0.1 // indirect
 	github.com/btcsuite/btcutil v1.0.2 // indirect
@@ -47,6 +50,7 @@ require (
 	github.com/jackpal/go-nat-pmp v1.0.2 // indirect
 	github.com/jbenet/go-temp-err-catcher v0.1.0 // indirect
 	github.com/jbenet/goprocess v0.1.4 // indirect
+	github.com/jwalton/go-supportscolor v1.1.0 // indirect
 	github.com/klauspost/compress v1.15.1 // indirect
 	github.com/klauspost/cpuid/v2 v2.1.0 // indirect
 	github.com/koron/go-ssdp v0.0.3 // indirect
@@ -55,8 +59,8 @@ require (
 	github.com/libp2p/go-flow-metrics v0.1.0 // indirect
 	github.com/libp2p/go-libp2p-asn-util v0.2.0 // indirect
 	github.com/libp2p/go-libp2p-core v0.20.0 // indirect
+	github.com/libp2p/go-libp2p-kad-dht v0.18.0 // indirect
 	github.com/libp2p/go-libp2p-kbucket v0.4.7 // indirect
-	github.com/libp2p/go-libp2p-pubsub v0.8.0 // indirect
 	github.com/libp2p/go-libp2p-record v0.2.0 // indirect
 	github.com/libp2p/go-msgio v0.2.0 // indirect
 	github.com/libp2p/go-nat v0.1.0 // indirect
@@ -107,12 +111,12 @@ require (
 	go.opencensus.io v0.23.0 // indirect
 	go.uber.org/atomic v1.10.0 // indirect
 	go.uber.org/multierr v1.8.0 // indirect
-	go.uber.org/zap v1.23.0 // indirect
 	golang.org/x/crypto v0.0.0-20220829220503-c86fa9a7ed90 // indirect
 	golang.org/x/mod v0.6.0-dev.0.20220419223038-86c51ed26bb4 // indirect
 	golang.org/x/net v0.0.0-20220812174116-3211cb980234 // indirect
 	golang.org/x/sync v0.0.0-20220722155255-886fb9371eb4 // indirect
 	golang.org/x/sys v0.0.0-20220811171246-fbc7d0a398ab // indirect
+	golang.org/x/term v0.0.0-20210927222741-03fcf44c2211 // indirect
 	golang.org/x/tools v0.1.12 // indirect
 	google.golang.org/protobuf v1.28.1 // indirect
 	gopkg.in/tomb.v1 v1.0.0-20141024135613-dd632973f1e7 // indirect

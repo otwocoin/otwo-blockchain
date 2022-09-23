@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"crypto/sha256"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -15,23 +14,26 @@ import (
 	"time"
 
 	"github.com/avvvet/oxygen/pkg/blockchain"
-	"github.com/avvvet/oxygen/pkg/wallet"
+	net "github.com/avvvet/oxygen/pkg/net"
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
 	"github.com/libp2p/go-libp2p/core/host"
 	"github.com/multiformats/go-multiaddr"
-	net "github.com/otwocoin/otwo-blockchain/internal/pkg/net"
-	util "github.com/otwocoin/otwo-blockchain/internal/pkg/util"
+	"github.com/otwocoin/otwo-blockchain/internal/app"
 	"go.uber.org/zap"
 )
 
 var (
-	logger, _ = zap.NewProduction() // or NewProduction, or NewDevelopment
+	network            = "otwo"
+	chain_ledger_path  = "./ledger/chain"
+	wallet_ledger_path = "./ledger/wallet"
+	logger, _          = zap.NewProduction() // or NewProduction, or NewDevelopment
 )
 
 type addrList []multiaddr.Multiaddr
 
 type Config struct {
-	Port           int
+	HttpPort       uint
+	PeerPort       uint
 	ProtocolID     string
 	Rendezvous     string
 	Seed           int64
@@ -39,28 +41,41 @@ type Config struct {
 }
 
 func main() {
+	app.Art()
 	config := Config{}
 
 	flag.StringVar(&config.Rendezvous, "meet", "otwo", "peer joining place")
 	flag.Int64Var(&config.Seed, "seed", 0, "0 is for random PeerID")
 	flag.Var(&config.DiscoveryPeers, "peer", "Perr address for peer discovery")
 	flag.StringVar(&config.ProtocolID, "protocolid", "/p2p/otwo", "")
-	flag.IntVar(&config.Port, "port", 0, "port for peer")
+	flag.UintVar(&config.HttpPort, "httpPort", 0, "http port for otwo wallet")
+	flag.UintVar(&config.PeerPort, "peerPort", 0, "port for otwo blockchain peer that connects to the network")
 	flag.Parse()
+
+	app.NewDir(chain_ledger_path)
+	app.NewDir(wallet_ledger_path)
+
+	/*wallet address for this node */
+	wl, err := app.InitWalletLedger(wallet_ledger_path)
+	if err != nil {
+		logger.Sugar().Warn("critical error in wallet address")
+	}
 
 	ctx, cancel := context.WithCancel(context.Background())
 
-	h, err := net.NewHost(ctx, config.Seed, config.Port)
+	h, err := net.NewHost(ctx, config.Seed, int(config.PeerPort))
 	if err != nil {
 		log.Fatal(err)
 	}
 
+	fmt.Println("peer network address")
 	for _, addr := range h.Addrs() {
 		log.Printf("  %s/p2p/%s", addr, h.ID().Pretty())
 	}
+	fmt.Println("")
 
 	/*create gossipSub */
-	pubSubInst, err := net.InitPubSub(ctx, h, "otwo")
+	ps, err := net.InitPubSub(ctx, h, network)
 	if err != err {
 		logger.Sugar().Fatal("Error: creating pubsub", err)
 	}
@@ -71,118 +86,24 @@ func main() {
 	}
 
 	go net.Discover(ctx, h, dht, config.Rendezvous)
-	go ListenBroadcast(ctx, pubSubInst.Subscription, h)
-	go ListPeers(h)
 
-	Process(ctx, pubSubInst)
-	run(h, cancel)
-}
-
-func Process(ctx context.Context, ps *net.PubsubInst) {
-	// Example: this will give us a 32 byte output
-	randomString, err := util.GenerateRandomString(32)
-	if err != nil {
-		// Serve an appropriately vague error to the
-		// user, but log the details internally.
-		panic(err)
-	}
-
-	//temp create wallet address and sign the first genesis transaction output
-	adamWallet := wallet.NewWallet()
-	eveWallet := wallet.NewWallet()
-
-	senderPK := util.Encode(adamWallet.PublicKey)
-	receiverPK := util.Encode(eveWallet.PublicKey)
-
-	natureRawTx := &wallet.RawTx{
-		SenderPublicKey:       senderPK,
-		SenderOxygenAddress:   adamWallet.OxygenAddress,
-		SenderRandomHash:      sha256.Sum256([]byte(randomString)),
-		ReceiverPublicKey:     senderPK,
-		ReceiverOxygenAddress: adamWallet.OxygenAddress,
-		Token:                 900,
-	}
-
-	txout := &blockchain.TxOutput{
-		RawTx:     natureRawTx,
-		Signature: natureRawTx.Sign(adamWallet.PrivateKey),
-	}
-
-	chain, err := blockchain.InitChain(txout)
+	/* init chain ledger */
+	chain, err := blockchain.InitChainLedger(chain_ledger_path)
 	if err != nil {
 		fmt.Print(err)
 	}
 	defer chain.Ledger.Db.Close()
 
-	rawTx1 := &wallet.RawTx{
-		SenderPublicKey:       senderPK,
-		SenderOxygenAddress:   adamWallet.OxygenAddress,
-		SenderRandomHash:      sha256.Sum256([]byte(randomString)),
-		Token:                 400,
-		ReceiverPublicKey:     receiverPK,
-		ReceiverOxygenAddress: eveWallet.OxygenAddress,
-	}
+	/*
+	  http server
+	  pass ctx, Topic and wallet list
+	*/
+	http := app.NewApp(ctx, config.HttpPort, ps.Topic, wl, chain)
+	go http.Run()
 
-	txout1 := &blockchain.TxOutput{
-		RawTx:     rawTx1,
-		Signature: rawTx1.Sign(adamWallet.PrivateKey),
-	}
-	tx1 := chain.NewTransaction(txout1)
-	chain.ChainBlock(`data {} `+strconv.Itoa(1), []*blockchain.Transaction{tx1})
+	go ListenBroadcast(ctx, ps, h, chain)
 
-	rawTx2 := &wallet.RawTx{
-		SenderPublicKey:       senderPK,
-		SenderOxygenAddress:   adamWallet.OxygenAddress,
-		SenderRandomHash:      sha256.Sum256([]byte(randomString)),
-		Token:                 490,
-		ReceiverPublicKey:     receiverPK,
-		ReceiverOxygenAddress: eveWallet.OxygenAddress,
-	}
-
-	txout2 := &blockchain.TxOutput{
-		RawTx:     rawTx2,
-		Signature: rawTx2.Sign(adamWallet.PrivateKey),
-	}
-	tx2 := chain.NewTransaction(txout2)
-
-	//broadcast
-	newblock, err := chain.ChainBlock(`data {} `+strconv.Itoa(1), []*blockchain.Transaction{tx2})
-	if err != nil {
-		panic(err)
-	}
-
-	data, err := json.Marshal(&net.BroadcastData{Type: "NEWBLOCK", Data: newblock})
-	if err != nil {
-		panic(err)
-	}
-	go Broadcaster(ctx, ps.Topic, data)
-
-	var i = 0
-	for {
-		data, err := chain.Ledger.Get([]byte(strconv.Itoa(i)))
-		if err != nil {
-			break
-		} else {
-			block := &blockchain.Block{}
-			err = json.Unmarshal(data, block)
-			if err != nil {
-				logger.Sugar().Fatal("unable to get block from store")
-			}
-
-			fmt.Printf("############## BlockHeight %v ############# \n", i)
-			fmt.Printf("Timestamp : %s \n", time.Unix(block.Timestamp, 0).Format(time.RFC3339))
-			fmt.Printf("Block Hash: %x\n", block.Hash)
-			fmt.Printf("Data: %s\n", block.Data)
-			fmt.Printf("Transaction ID: %x Inputs %+v  Outputs %+v\n", block.Transaction[0].ID, block.Transaction[0].Inputs, block.Transaction[0].Outputs)
-			fmt.Printf("Merkle root: %x\n", block.MerkleRoot)
-			fmt.Printf("Previous Hash: %x\n", block.PrevHash)
-			fmt.Printf("Difficulty: %v\n", block.Difficulty)
-			fmt.Printf("Nonce: %v\n", block.Nonce)
-			fmt.Printf("BlockHeight: %v\n", block.BlockHeight)
-		}
-		i++
-	}
-
+	run(h, cancel)
 }
 
 type Stream struct {
@@ -190,38 +111,97 @@ type Stream struct {
 	Block *blockchain.Block
 }
 
-func ListenBroadcast(ctx context.Context, s *pubsub.Subscription, h host.Host) {
+func ListenBroadcast(ctx context.Context, psi *net.PubsubInst, h host.Host, chain *blockchain.Chain) {
 	for {
-		msg, err := s.Next(ctx)
+		msg, err := psi.Subscription.Next(ctx)
 		if err != nil {
-			fmt.Println("errrrrrrrr", err)
+			break //when context cancel called from main
 		}
 
 		//only consider messages delivered by other peers
-		if msg.ReceivedFrom == h.ID() {
-			continue
-		}
+		// if msg.ReceivedFrom == h.ID() {
+		// 	continue
+		// }
 
 		var b *net.BroadcastData
 		json.Unmarshal([]byte(msg.Data), &b)
 
 		switch t := b.Type; t {
 		case "NEWBLOCK":
-			ValidateBlock(b.Data)
+			//			ValidateBlock(b.Data, chain)
 			fmt.Println("Newwwwwwwwwwwwww arrived ******************************* ", msg.ReceivedFrom)
+		case "NEWTXOUTPUT":
+			err := Mine(ctx, b.Data, chain, psi.Topic)
+			if err != nil {
+				logger.Sugar().Warn(err)
+			}
 		}
 
 	}
 }
+func Mine(ctx context.Context, b []byte, chain *blockchain.Chain, topic *pubsub.Topic) error {
+	txoutput := &blockchain.TxOutput{}
+	err := json.Unmarshal(b, txoutput)
+	if err != nil {
+		logger.Sugar().Warn("error: transaction decoding error")
+		return err
+	}
 
-func ValidateBlock(b []byte) {
+	/*create the transaction from raw*/
+	tx, err := chain.NewTransaction(txoutput)
+	if err != nil {
+		logger.Sugar().Warn("mine error: could not create transaction")
+		return err
+	}
+
+	/*create block*/
+	block, err := chain.ChainBlock(`data {} `+strconv.Itoa(1), []*blockchain.Transaction{tx})
+	if err != nil {
+		logger.Sugar().Warn("mine error: could not chain block")
+		return err
+	}
+
+	//encode the new block
+	blockByte, err := json.Marshal(block)
+	if err != nil {
+		logger.Sugar().Warn("mine error: could not encode the newblock for broadcast")
+		return err
+	}
+
+	data, err := json.Marshal(&net.BroadcastData{Type: "NEWBLOCK", Data: blockByte})
+	if err != nil {
+		logger.Sugar().Warn("mine error: could not encode broadcast data ")
+		return err
+	}
+
+	err = topic.Publish(ctx, data)
+	if err != nil {
+		logger.Sugar().Warn("mine error: could not broadcast")
+		return err
+	}
+
+	logger.Sugar().Info("💥️ new block broadcasted")
+	return nil
+}
+
+func ValidateBlock(b []byte, chain *blockchain.Chain) {
 	block := &blockchain.Block{}
 	err := json.Unmarshal(b, block)
 	if err != nil {
 		panic(err)
 	}
-    
-	block.
+
+	//check if the blockheight
+	if (block.BlockHeight - chain.LastBlock.BlockHeight) == 1 {
+		if block.IsBlockValid(block.Nonce) && block.PrevHash == chain.LastBlock.Hash {
+			err = chain.Ledger.Upsert([]byte(strconv.Itoa(block.BlockHeight)), b)
+			if err != nil {
+				logger.Sugar().Fatal("unable to store data")
+			}
+
+			logger.Sugar().Info("chain updated from network  ********************************* ", block.BlockHeight)
+		}
+	}
 }
 
 func Broadcaster(ctx context.Context, t *pubsub.Topic, data []byte) {
@@ -238,27 +218,27 @@ func Broadcaster(ctx context.Context, t *pubsub.Topic, data []byte) {
 
 }
 
-func ListPeers(h host.Host) {
-	ticker := time.NewTicker(time.Second * 5)
-	defer ticker.Stop()
+// func ListPeers(h host.Host) {
+// 	ticker := time.NewTicker(time.Second * 5)
+// 	defer ticker.Stop()
 
-	for {
-		select {
-		case <-ticker.C:
-			p := h.Network().Peers()
-			for _, b := range p {
-				fmt.Printf("%s \n", b)
-			}
-		}
-	}
+// 	for {
+// 		select {
+// 		case <-ticker.C:
+// 			p := h.Network().Peers()
+// 			for _, b := range p {
+// 				fmt.Printf("%s \n", b)
+// 			}
+// 		}
+// 	}
 
-}
+// }
 
 func run(h host.Host, cancel func()) {
 	c := make(chan os.Signal, 1)
 	signal.Notify(c, os.Interrupt, syscall.SIGHUP, syscall.SIGINT, syscall.SIGTERM)
 	<-c
-	fmt.Printf("\rExiting... \n")
+	fmt.Printf("\r👋️ stopped...\n")
 
 	cancel()
 
