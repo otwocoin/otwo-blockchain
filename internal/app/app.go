@@ -29,6 +29,10 @@ var (
 	logger, _ = zap.NewDevelopment()
 )
 
+type ReqUTXO struct {
+	WalletAddress string
+}
+
 type HttpServer struct {
 	port        uint
 	topic       *pubsub.Topic
@@ -172,6 +176,30 @@ func (h *HttpServer) Chains(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+func (h *HttpServer) UTXO(w http.ResponseWriter, req *http.Request) {
+	switch req.Method {
+	case http.MethodGet:
+		w.Header().Add("Content-Type", "application/json")
+		body := &ReqUTXO{}
+		decoder := json.NewDecoder(req.Body)
+		err := decoder.Decode(body)
+		if err != nil {
+			io.WriteString(w, "error to decode")
+			return
+		}
+		utxo, balance := h.chain.GetUTXO(body.WalletAddress)
+
+		m, _ := json.Marshal(struct {
+			UTXO    []blockchain.UTXO `json:"utxo"`
+			Balance int               `json:"unspent_balance"`
+		}{
+			UTXO:    utxo,
+			Balance: balance,
+		})
+		io.WriteString(w, string(m[:]))
+	}
+}
+
 func (h *HttpServer) Index(w http.ResponseWriter, req *http.Request) {
 	switch req.Method {
 	case http.MethodGet:
@@ -182,15 +210,11 @@ func (h *HttpServer) Index(w http.ResponseWriter, req *http.Request) {
 	}
 }
 
-type TransactionReq struct {
-	Token                 int
-	WalletIndex           int
-	ReceiverWalletAddress string
-}
-
 func (h *HttpServer) Run() {
 	http.HandleFunc("/", h.Status)
 	http.HandleFunc("/chains", h.Chains)
+	http.HandleFunc("/utxo", h.UTXO)
+
 	listener, err := net.Listen("tcp", ":"+strconv.Itoa(int(h.port)))
 	if err != nil {
 		panic(err)
